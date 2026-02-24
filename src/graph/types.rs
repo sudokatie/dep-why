@@ -46,6 +46,16 @@ pub struct DependencyGraph {
     pub root_packages: Vec<NodeIndex>,
 }
 
+impl std::fmt::Debug for DependencyGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DependencyGraph")
+            .field("package_count", &self.graph.node_count())
+            .field("dependency_count", &self.graph.edge_count())
+            .field("root_count", &self.root_packages.len())
+            .finish()
+    }
+}
+
 impl DependencyGraph {
     pub fn new() -> Self {
         Self {

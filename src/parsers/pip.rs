@@ -43,27 +43,28 @@ struct PoetryPackage {
 
 impl Parser for PipParser {
     fn parse(&self, path: &Path) -> Result<DependencyGraph> {
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| Error::io_error(path, e))?;
         let filename = path.file_name()
             .and_then(|f| f.to_str())
             .unwrap_or("");
         
         if filename == "Pipfile.lock" {
-            self.parse_pipfile(&content)
+            self.parse_pipfile(path, &content)
         } else if filename == "poetry.lock" {
-            self.parse_poetry(&content)
+            self.parse_poetry(path, &content)
         } else {
-            Err(Error::ParseError(format!("unsupported pip lock file: {}", filename)))
+            Err(Error::UnsupportedFormat(path.to_path_buf()))
         }
     }
 }
 
 impl PipParser {
-    fn parse_pipfile(&self, content: &str) -> Result<DependencyGraph> {
+    fn parse_pipfile(&self, path: &Path, content: &str) -> Result<DependencyGraph> {
         let lock: PipfileLock = serde_json::from_str(content)
-            .map_err(|e| Error::ParseError(format!("invalid Pipfile.lock: {}", e)))?;
+            .map_err(|e| Error::parse_error(path, format!("invalid Pipfile.lock: {}", e)))?;
         
-        let mut builder = GraphBuilder::new();
+        let mut builder = GraphBuilder::with_name("project");
         
         // Add a virtual root for the project
         let root = builder.add_root("project", "0.0.0");
@@ -93,15 +94,15 @@ impl PipParser {
         Ok(builder.build())
     }
     
-    fn parse_poetry(&self, content: &str) -> Result<DependencyGraph> {
+    fn parse_poetry(&self, path: &Path, content: &str) -> Result<DependencyGraph> {
         let lock: PoetryLock = toml::from_str(content)
-            .map_err(|e| Error::ParseError(format!("invalid poetry.lock: {}", e)))?;
+            .map_err(|e| Error::parse_error(path, format!("invalid poetry.lock: {}", e)))?;
         
         if lock.package.is_empty() {
-            return Err(Error::ParseError("empty poetry.lock".into()));
+            return Err(Error::parse_error(path, "empty poetry.lock"));
         }
         
-        let mut builder = GraphBuilder::new();
+        let mut builder = GraphBuilder::with_name("project");
         
         // Build package map
         let mut package_map: HashMap<String, petgraph::graph::NodeIndex> = HashMap::new();

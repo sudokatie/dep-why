@@ -17,6 +17,7 @@ dep-why traces every route from your direct dependencies to any transitive depen
 - Multiple output formats: colored tree, JSON, Mermaid diagrams
 - Fast - parses lock files, not installed packages
 - Depth limiting for those terrifying dependency trees
+- Dev dependency filtering - see production deps only by default
 
 ## Installation
 
@@ -38,11 +39,11 @@ cargo build --release
 # Find why lodash is in your project
 dep-why lodash
 
-# Show ALL paths (not just shortest)
+# Show ALL paths (not just shortest 5)
 dep-why lodash --all
 
-# With version numbers
-dep-why lodash -v
+# Limit search depth
+dep-why lodash -d 3
 
 # JSON output (for scripting)
 dep-why lodash -f json
@@ -50,11 +51,20 @@ dep-why lodash -f json
 # Mermaid diagram (paste into GitHub markdown)
 dep-why lodash -f mermaid
 
-# Check a different directory
-dep-why lodash -d /path/to/project
+# Include dev dependencies in search
+dep-why jest --include-dev
 
-# Force a specific package manager
-dep-why serde --manager cargo
+# Check a specific version
+dep-why lodash -v 4.17.21
+
+# Quiet mode for scripts (exit 0 if found)
+dep-why lodash -q && echo "found"
+
+# Use a specific lock file
+dep-why lodash -l /path/to/package-lock.json
+
+# Force a specific ecosystem
+dep-why serde -e cargo
 ```
 
 ## CLI Reference
@@ -63,17 +73,20 @@ dep-why serde --manager cargo
 dep-why [OPTIONS] <PACKAGE>
 
 Arguments:
-  <PACKAGE>  Package name to trace
+  <PACKAGE>  Package name to search for
 
 Options:
-  -a, --all              Show all paths (default: only shortest)
-  -d, --dir <DIR>        Project directory (default: current)
-  --manager <MANAGER>    Force package manager [npm, cargo, pip]
-  -f, --format <FORMAT>  Output format [tree, json, mermaid]
-  --max-depth <N>        Maximum search depth [default: 20]
-  -v, --versions         Show dependency versions
-  -h, --help             Print help
-  -V, --version          Print version
+  -a, --all                Show all paths (default: up to 5 shortest)
+  -d, --depth <N>          Maximum depth to search [default: unlimited]
+  -f, --format <FORMAT>    Output format [tree, json, mermaid] [default: tree]
+  -e, --ecosystem <ECO>    Force ecosystem [npm, cargo, pip]
+  -l, --lock-file <PATH>   Path to lock file
+      --include-dev        Include dev dependencies in search
+  -v, --version-match <V>  Only match specific version
+  -q, --quiet              Minimal output (exit 0 if found, for scripts)
+      --dir <DIR>          Project directory [default: current]
+  -h, --help               Print help
+  -V, --version            Print version
 ```
 
 ## Output Formats
@@ -81,35 +94,38 @@ Options:
 ### Tree (default)
 
 ```
-Found 2 path(s):
+lodash@4.17.21
+├── Found via: express@4.18.2
+│   └── accepts@1.3.8
+│       └── lodash@4.17.21
+└── Found via: webpack@5.88.0
+    └── lodash@4.17.21
 
-Path 1:
-my-app
-  └─ express
-    └─ accepts
-      └─ lodash
-
-Path 2:
-my-app
-  └─ webpack
-    └─ lodash
+Summary: 2 paths found (shortest: 2, longest: 3)
+Direct dependents: express, webpack
 ```
 
 ### JSON
 
 ```json
 {
-  "total_paths": 2,
+  "target": {
+    "name": "lodash",
+    "version": "4.17.21"
+  },
   "paths": [
     {
-      "packages": [
-        {"name": "my-app", "version": "1.0.0"},
-        {"name": "express", "version": "4.18.2"},
-        {"name": "lodash", "version": "4.17.21"}
-      ],
-      "length": 3
+      "chain": ["express@4.18.2", "accepts@1.3.8", "lodash@4.17.21"],
+      "depth": 3,
+      "is_dev": false
     }
-  ]
+  ],
+  "summary": {
+    "total_paths": 2,
+    "shortest_depth": 2,
+    "longest_depth": 3,
+    "direct_dependents": ["express", "webpack"]
+  }
 }
 ```
 
@@ -117,14 +133,35 @@ my-app
 
 ```
 graph TD
-    my_app["my-app"]
-    express["express"]
-    lodash["lodash"]
-    my_app --> express
-    express --> lodash
+    ROOT[my-project]
+    ROOT --> express
+    express --> accepts
+    accepts --> lodash
+    lodash["lodash@4.17.21 - TARGET"]
+    style lodash fill:#f96
 ```
 
 Paste this into any GitHub markdown file to get a rendered diagram.
+
+## Configuration
+
+Create `.dep-why.toml` in your project root or `~/.config/dep-why/config.toml`:
+
+```toml
+# Default output format
+format = "tree"
+
+# Default max paths (0 = unlimited with --all)
+max_paths = 5
+
+# Include dev dependencies by default
+include_dev = false
+```
+
+Environment variables:
+- `DEP_WHY_FORMAT` - Default output format
+- `DEP_WHY_MAX_PATHS` - Default max paths
+- `DEP_WHY_COLOR` - Force color output (auto, always, never)
 
 ## Supported Lock Files
 
@@ -141,11 +178,8 @@ Note: requirements.txt is not supported (no dependency graph info).
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success |
-| 1 | Package not found |
-| 2 | No lock file / invalid path |
-| 3 | Parse error |
-| 4 | IO error |
+| 0 | Success (including "not found" - that's a valid answer) |
+| 1 | Error (couldn't complete the query) |
 
 ## Performance
 

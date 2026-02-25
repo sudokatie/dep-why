@@ -33,19 +33,22 @@ struct NpmPackage {
 
 impl Parser for NpmParser {
     fn parse(&self, path: &Path) -> Result<DependencyGraph> {
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| Error::io_error(path, e))?;
         let lock: PackageLock = serde_json::from_str(&content)
-            .map_err(|e| Error::ParseError(format!("invalid package-lock.json: {}", e)))?;
+            .map_err(|e| Error::parse_error(path, format!("invalid package-lock.json: {}", e)))?;
         
         // Check lockfile version
         let version = lock.lockfile_version.unwrap_or(1);
         if version < 2 {
-            return Err(Error::ParseError(
-                "package-lock.json v1 not supported, please upgrade to npm 7+".into()
+            return Err(Error::parse_error(
+                path,
+                "package-lock.json v1 not supported, please upgrade to npm 7+"
             ));
         }
         
-        let mut builder = GraphBuilder::new();
+        let project_name = lock.name.clone().unwrap_or_else(|| "project".to_string());
+        let mut builder = GraphBuilder::with_name(&project_name);
         
         // First pass: add all packages
         let mut package_map: HashMap<String, petgraph::graph::NodeIndex> = HashMap::new();
@@ -158,6 +161,7 @@ mod tests {
         assert_eq!(graph.package_count(), 2);
         assert!(graph.get_package("test-project").is_some());
         assert!(graph.get_package("lodash").is_some());
+        assert_eq!(graph.project_name, "test-project");
     }
 
     #[test]

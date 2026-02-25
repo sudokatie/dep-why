@@ -25,20 +25,22 @@ struct CargoPackage {
 
 impl Parser for CargoParser {
     fn parse(&self, path: &Path) -> Result<DependencyGraph> {
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| Error::io_error(path, e))?;
         let lock: CargoLock = toml::from_str(&content)
-            .map_err(|e| Error::ParseError(format!("invalid Cargo.lock: {}", e)))?;
+            .map_err(|e| Error::parse_error(path, format!("invalid Cargo.lock: {}", e)))?;
         
         if lock.package.is_empty() {
-            return Err(Error::ParseError("empty Cargo.lock".into()));
+            return Err(Error::parse_error(path, "empty Cargo.lock"));
         }
         
-        let mut builder = GraphBuilder::new();
+        // First package is typically the root (workspace member)
+        let project_name = lock.package.first().map(|p| p.name.clone()).unwrap_or_else(|| "project".to_string());
+        let mut builder = GraphBuilder::with_name(&project_name);
         
         // Build a map of name@version -> NodeIndex
         let mut package_map: HashMap<String, petgraph::graph::NodeIndex> = HashMap::new();
         
-        // First package is typically the root (workspace member)
         let mut is_first = true;
         
         for pkg in &lock.package {
@@ -137,6 +139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         assert_eq!(graph.package_count(), 2);
         assert!(graph.get_package("myapp").is_some());
         assert!(graph.get_package("serde").is_some());
+        assert_eq!(graph.project_name, "myapp");
     }
 
     #[test]

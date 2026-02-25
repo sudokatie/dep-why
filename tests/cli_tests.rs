@@ -94,7 +94,7 @@ fn test_find_direct_dependency() {
     
     cmd()
         .arg("express")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .assert()
         .success()
@@ -108,7 +108,7 @@ fn test_find_transitive_dependency() {
     
     cmd()
         .arg("accepts")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .assert()
         .success()
@@ -122,7 +122,7 @@ fn test_find_deep_dependency() {
     
     cmd()
         .arg("mime-types")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .assert()
         .success()
@@ -134,13 +134,14 @@ fn test_package_not_found() {
     let dir = TempDir::new().unwrap();
     create_npm_project(dir.path());
     
+    // Per spec: package not found is exit 0 (it's a valid answer)
     cmd()
         .arg("nonexistent-package")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("not found"));
+        .success()
+        .stderr(predicate::str::contains("not in your dependency tree"));
 }
 
 #[test]
@@ -149,11 +150,11 @@ fn test_no_lock_file() {
     
     cmd()
         .arg("lodash")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .assert()
         .failure()
-        .stderr(predicate::str::contains("no lock file"));
+        .stderr(predicate::str::contains("No lock file"));
 }
 
 #[test]
@@ -163,13 +164,14 @@ fn test_json_output() {
     
     cmd()
         .arg("express")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .arg("-f")
         .arg("json")
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"total_paths\""));
+        .stdout(predicate::str::contains("\"target\":"))
+        .stdout(predicate::str::contains("\"summary\":"));
 }
 
 #[test]
@@ -179,28 +181,31 @@ fn test_mermaid_output() {
     
     cmd()
         .arg("express")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .arg("-f")
         .arg("mermaid")
         .assert()
         .success()
-        .stdout(predicate::str::contains("graph TD"));
+        .stdout(predicate::str::contains("graph TD"))
+        .stdout(predicate::str::contains("ROOT"));
 }
 
 #[test]
-fn test_versions_flag() {
+fn test_depth_flag() {
     let dir = TempDir::new().unwrap();
     create_npm_project(dir.path());
     
+    // With depth 1, should not find deep deps (mime-types is at depth 3)
     cmd()
-        .arg("express")
-        .arg("-d")
+        .arg("mime-types")
+        .arg("--dir")
         .arg(dir.path())
-        .arg("-v")
+        .arg("-d")
+        .arg("1")
         .assert()
         .success()
-        .stdout(predicate::str::contains("4.18.2"));
+        .stderr(predicate::str::contains("not reachable"));
 }
 
 #[test]
@@ -210,7 +215,7 @@ fn test_all_paths_flag() {
     
     cmd()
         .arg("accepts")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
         .arg("--all")
         .assert()
@@ -218,58 +223,114 @@ fn test_all_paths_flag() {
 }
 
 #[test]
-fn test_force_npm_manager() {
+fn test_ecosystem_flag() {
     let dir = TempDir::new().unwrap();
     create_npm_project(dir.path());
     
     cmd()
         .arg("express")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
-        .arg("--manager")
+        .arg("-e")
         .arg("npm")
         .assert()
         .success();
 }
 
 #[test]
-fn test_force_cargo_manager() {
+fn test_ecosystem_cargo() {
     let dir = TempDir::new().unwrap();
     create_cargo_project(dir.path());
     
     cmd()
         .arg("tokio")
-        .arg("-d")
+        .arg("--dir")
         .arg(dir.path())
-        .arg("--manager")
+        .arg("-e")
         .arg("cargo")
         .assert()
         .success();
 }
 
 #[test]
-fn test_max_depth_limit() {
+fn test_quiet_mode_found() {
     let dir = TempDir::new().unwrap();
     create_npm_project(dir.path());
     
-    // With max-depth 1, should not find deep deps (mime-types is at depth 3)
+    // Quiet mode: exit 0 if found, no output
     cmd()
-        .arg("mime-types")
-        .arg("-d")
+        .arg("express")
+        .arg("--dir")
         .arg(dir.path())
-        .arg("--max-depth")
-        .arg("1")
+        .arg("-q")
         .assert()
         .success()
-        .stderr(predicate::str::contains("not reachable"));
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn test_quiet_mode_not_found() {
+    let dir = TempDir::new().unwrap();
+    create_npm_project(dir.path());
+    
+    // Quiet mode: exit 0 even if not found (per spec)
+    cmd()
+        .arg("nonexistent")
+        .arg("--dir")
+        .arg(dir.path())
+        .arg("-q")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_lock_file_flag() {
+    let dir = TempDir::new().unwrap();
+    create_npm_project(dir.path());
+    
+    cmd()
+        .arg("express")
+        .arg("-l")
+        .arg(dir.path().join("package-lock.json"))
+        .assert()
+        .success();
 }
 
 #[test]
 fn test_invalid_directory() {
     cmd()
         .arg("lodash")
-        .arg("-d")
+        .arg("--dir")
         .arg("/nonexistent/path/that/does/not/exist")
         .assert()
         .failure();
+}
+
+#[test]
+fn test_tree_output_has_summary() {
+    let dir = TempDir::new().unwrap();
+    create_npm_project(dir.path());
+    
+    cmd()
+        .arg("accepts")
+        .arg("--dir")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Summary:"))
+        .stdout(predicate::str::contains("Direct dependents:"));
+}
+
+#[test]
+fn test_tree_output_has_found_via() {
+    let dir = TempDir::new().unwrap();
+    create_npm_project(dir.path());
+    
+    cmd()
+        .arg("accepts")
+        .arg("--dir")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Found via:"));
 }

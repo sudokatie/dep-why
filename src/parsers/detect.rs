@@ -1,21 +1,22 @@
-use crate::cli::PackageManager;
+use crate::cli::Ecosystem;
 use std::path::{Path, PathBuf};
 
 /// Information about a detected lock file
 #[derive(Debug, Clone)]
 pub struct LockFile {
     pub path: PathBuf,
-    pub manager: PackageManager,
+    pub ecosystem: Ecosystem,
 }
 
 /// Detect which package manager is used in a directory
-pub fn detect_manager(dir: &Path) -> Option<LockFile> {
+/// Priority order: npm > cargo > pip (per spec Section 4.2)
+pub fn detect_ecosystem(dir: &Path) -> Option<LockFile> {
     // Check for npm
     let npm_lock = dir.join("package-lock.json");
     if npm_lock.exists() {
         return Some(LockFile {
             path: npm_lock,
-            manager: PackageManager::Npm,
+            ecosystem: Ecosystem::Npm,
         });
     }
     
@@ -24,7 +25,7 @@ pub fn detect_manager(dir: &Path) -> Option<LockFile> {
     if cargo_lock.exists() {
         return Some(LockFile {
             path: cargo_lock,
-            manager: PackageManager::Cargo,
+            ecosystem: Ecosystem::Cargo,
         });
     }
     
@@ -33,7 +34,7 @@ pub fn detect_manager(dir: &Path) -> Option<LockFile> {
     if pipfile_lock.exists() {
         return Some(LockFile {
             path: pipfile_lock,
-            manager: PackageManager::Pip,
+            ecosystem: Ecosystem::Pip,
         });
     }
     
@@ -41,11 +42,23 @@ pub fn detect_manager(dir: &Path) -> Option<LockFile> {
     if poetry_lock.exists() {
         return Some(LockFile {
             path: poetry_lock,
-            manager: PackageManager::Pip,
+            ecosystem: Ecosystem::Pip,
         });
     }
     
     None
+}
+
+/// Detect ecosystem from a lock file path
+pub fn detect_from_path(path: &Path) -> Option<Ecosystem> {
+    let filename = path.file_name()?.to_str()?;
+    
+    match filename {
+        "package-lock.json" => Some(Ecosystem::Npm),
+        "Cargo.lock" => Some(Ecosystem::Cargo),
+        "Pipfile.lock" | "poetry.lock" => Some(Ecosystem::Pip),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -59,9 +72,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         File::create(dir.path().join("package-lock.json")).unwrap();
         
-        let result = detect_manager(dir.path());
+        let result = detect_ecosystem(dir.path());
         assert!(result.is_some());
-        assert!(matches!(result.unwrap().manager, PackageManager::Npm));
+        assert!(matches!(result.unwrap().ecosystem, Ecosystem::Npm));
     }
 
     #[test]
@@ -69,9 +82,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         File::create(dir.path().join("Cargo.lock")).unwrap();
         
-        let result = detect_manager(dir.path());
+        let result = detect_ecosystem(dir.path());
         assert!(result.is_some());
-        assert!(matches!(result.unwrap().manager, PackageManager::Cargo));
+        assert!(matches!(result.unwrap().ecosystem, Ecosystem::Cargo));
     }
 
     #[test]
@@ -79,9 +92,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         File::create(dir.path().join("Pipfile.lock")).unwrap();
         
-        let result = detect_manager(dir.path());
+        let result = detect_ecosystem(dir.path());
         assert!(result.is_some());
-        assert!(matches!(result.unwrap().manager, PackageManager::Pip));
+        assert!(matches!(result.unwrap().ecosystem, Ecosystem::Pip));
     }
 
     #[test]
@@ -89,15 +102,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         File::create(dir.path().join("poetry.lock")).unwrap();
         
-        let result = detect_manager(dir.path());
+        let result = detect_ecosystem(dir.path());
         assert!(result.is_some());
-        assert!(matches!(result.unwrap().manager, PackageManager::Pip));
+        assert!(matches!(result.unwrap().ecosystem, Ecosystem::Pip));
     }
 
     #[test]
     fn test_detect_none() {
         let dir = TempDir::new().unwrap();
-        let result = detect_manager(dir.path());
+        let result = detect_ecosystem(dir.path());
         assert!(result.is_none());
     }
 
@@ -108,7 +121,28 @@ mod tests {
         File::create(dir.path().join("package-lock.json")).unwrap();
         File::create(dir.path().join("Cargo.lock")).unwrap();
         
-        let result = detect_manager(dir.path());
-        assert!(matches!(result.unwrap().manager, PackageManager::Npm));
+        let result = detect_ecosystem(dir.path());
+        assert!(matches!(result.unwrap().ecosystem, Ecosystem::Npm));
+    }
+
+    #[test]
+    fn test_detect_from_path() {
+        assert!(matches!(
+            detect_from_path(Path::new("/tmp/package-lock.json")),
+            Some(Ecosystem::Npm)
+        ));
+        assert!(matches!(
+            detect_from_path(Path::new("/tmp/Cargo.lock")),
+            Some(Ecosystem::Cargo)
+        ));
+        assert!(matches!(
+            detect_from_path(Path::new("/tmp/Pipfile.lock")),
+            Some(Ecosystem::Pip)
+        ));
+        assert!(matches!(
+            detect_from_path(Path::new("/tmp/poetry.lock")),
+            Some(Ecosystem::Pip)
+        ));
+        assert!(detect_from_path(Path::new("/tmp/unknown.txt")).is_none());
     }
 }

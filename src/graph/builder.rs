@@ -1,4 +1,4 @@
-use super::{DependencyGraph, Package, Dependency};
+use super::{DependencyGraph, Package, Dependency, DependencyType};
 use petgraph::graph::NodeIndex;
 
 /// Builder for constructing dependency graphs
@@ -13,8 +13,14 @@ impl GraphBuilder {
         }
     }
     
+    pub fn with_name(name: impl Into<String>) -> Self {
+        Self {
+            graph: DependencyGraph::with_name(name),
+        }
+    }
+    
     pub fn add_root(&mut self, name: impl Into<String>, version: impl Into<String>) -> NodeIndex {
-        let pkg = Package::new(name, version);
+        let pkg = Package::direct(name, version);
         let idx = self.graph.add_package(pkg);
         self.graph.root_packages.push(idx);
         idx
@@ -25,8 +31,14 @@ impl GraphBuilder {
         self.graph.add_package(pkg)
     }
     
+    pub fn add_direct_package(&mut self, name: impl Into<String>, version: impl Into<String>) -> NodeIndex {
+        let mut pkg = Package::new(name, version);
+        pkg.is_direct = true;
+        self.graph.add_package(pkg)
+    }
+    
     pub fn add_dep(&mut self, from: NodeIndex, to: NodeIndex) {
-        self.graph.add_dependency(from, to, Dependency::default());
+        self.graph.add_dependency(from, to, Dependency::runtime());
     }
     
     pub fn add_dep_with_constraint(
@@ -37,25 +49,16 @@ impl GraphBuilder {
     ) {
         self.graph.add_dependency(from, to, Dependency {
             version_constraint: constraint.into(),
-            is_dev: false,
-            is_optional: false,
+            dep_type: DependencyType::Runtime,
         });
     }
     
     pub fn add_dev_dep(&mut self, from: NodeIndex, to: NodeIndex) {
-        self.graph.add_dependency(from, to, Dependency {
-            version_constraint: "*".to_string(),
-            is_dev: true,
-            is_optional: false,
-        });
+        self.graph.add_dependency(from, to, Dependency::dev());
     }
     
     pub fn add_optional_dep(&mut self, from: NodeIndex, to: NodeIndex) {
-        self.graph.add_dependency(from, to, Dependency {
-            version_constraint: "*".to_string(),
-            is_dev: false,
-            is_optional: true,
-        });
+        self.graph.add_dependency(from, to, Dependency::optional());
     }
     
     pub fn build(self) -> DependencyGraph {
@@ -81,6 +84,13 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_with_name() {
+        let builder = GraphBuilder::with_name("my-app");
+        let graph = builder.build();
+        assert_eq!(graph.project_name, "my-app");
+    }
+
+    #[test]
     fn test_add_root() {
         let mut builder = GraphBuilder::new();
         builder.add_root("myapp", "1.0.0");
@@ -88,6 +98,18 @@ mod tests {
         
         assert_eq!(graph.package_count(), 1);
         assert_eq!(graph.root_packages.len(), 1);
+        
+        let root_idx = graph.root_packages[0];
+        assert!(graph.graph[root_idx].is_direct);
+    }
+
+    #[test]
+    fn test_add_direct_package() {
+        let mut builder = GraphBuilder::new();
+        let idx = builder.add_direct_package("lodash", "4.17.21");
+        let graph = builder.build();
+        
+        assert!(graph.graph[idx].is_direct);
     }
 
     #[test]
@@ -129,5 +151,9 @@ mod tests {
         
         let graph = builder.build();
         assert_eq!(graph.dependency_count(), 1);
+        
+        // Check the edge is marked as dev
+        let edge = graph.graph.edges(root).next().unwrap();
+        assert!(edge.weight().is_dev());
     }
 }

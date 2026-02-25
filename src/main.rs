@@ -6,7 +6,9 @@ fn main() -> ExitCode {
     match run(args) {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: {e}");
+            // Print error message
+            eprintln!("{}", e);
+            // Use appropriate exit code per spec
             e.exit_code()
         }
     }

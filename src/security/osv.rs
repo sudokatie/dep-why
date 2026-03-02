@@ -108,7 +108,7 @@ impl OsvClient {
                 
                 Ok(osv_response.vulns.into_iter().map(|v| v.into()).collect())
             }
-            Err(ureq::Error::Status(code, _)) if code == 404 => {
+            Err(ureq::Error::Status(404, _)) => {
                 // No vulnerabilities found
                 Ok(vec![])
             }
@@ -123,7 +123,7 @@ impl OsvClient {
     /// Get cache file path.
     fn cache_path(&self, name: &str, version: &str, ecosystem: &str) -> PathBuf {
         // Sanitize name for filesystem
-        let safe_name = name.replace('/', "_").replace('\\', "_");
+        let safe_name = name.replace(['/', '\\'], "_");
         self.cache_dir
             .join(ecosystem)
             .join(format!("{}@{}.json", safe_name, version))

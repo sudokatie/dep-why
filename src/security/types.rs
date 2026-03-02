@@ -26,8 +26,8 @@ impl Severity {
         }
     }
 
-    /// Convert from string (case-insensitive).
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse severity from string (case-insensitive).
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "LOW" => Some(Severity::Low),
             "MEDIUM" | "MODERATE" => Some(Severity::Medium),
@@ -117,11 +117,11 @@ mod tests {
     }
 
     #[test]
-    fn test_severity_from_str() {
-        assert_eq!(Severity::from_str("high"), Some(Severity::High));
-        assert_eq!(Severity::from_str("HIGH"), Some(Severity::High));
-        assert_eq!(Severity::from_str("moderate"), Some(Severity::Medium));
-        assert_eq!(Severity::from_str("unknown"), None);
+    fn test_severity_parse() {
+        assert_eq!(Severity::parse("high"), Some(Severity::High));
+        assert_eq!(Severity::parse("HIGH"), Some(Severity::High));
+        assert_eq!(Severity::parse("moderate"), Some(Severity::Medium));
+        assert_eq!(Severity::parse("unknown"), None);
     }
 
     #[test]

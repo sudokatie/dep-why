@@ -125,13 +125,71 @@ pub fn run(args: Args) -> Result<()> {
         return Ok(());
     }
     
+    // Check for vulnerabilities if --security or --security-only flag is set
+    let vuln_info = if args.security || args.security_only {
+        use security::OsvClient;
+        
+        let client = OsvClient::new();
+        let target_pkg = &graph.graph[target_idx];
+        
+        // Map CLI ecosystem to OSV ecosystem string
+        let osv_ecosystem = match ecosystem {
+            Ecosystem::Npm => "npm",
+            Ecosystem::Cargo => "cargo",
+            Ecosystem::Pip => "pip",
+        };
+        
+        match client.check_package(&target_pkg.name, &target_pkg.version, osv_ecosystem) {
+            Ok(info) => {
+                // Filter by severity if specified
+                let min_severity = args.severity.map(|s| match s {
+                    cli::Severity::Low => security::Severity::Low,
+                    cli::Severity::Medium => security::Severity::Medium,
+                    cli::Severity::High => security::Severity::High,
+                    cli::Severity::Critical => security::Severity::Critical,
+                });
+                
+                if let Some(min) = min_severity {
+                    let filtered: Vec<_> = info.vulnerabilities.iter()
+                        .filter(|v| v.severity >= min)
+                        .cloned()
+                        .collect();
+                    Some(security::VulnerabilityInfo {
+                        vulnerabilities: filtered,
+                        ..info
+                    })
+                } else {
+                    Some(info)
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: Security check failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    
+    // If --security-only is set and no vulnerabilities, exit early
+    if args.security_only {
+        if let Some(ref info) = vuln_info {
+            if info.vulnerabilities.is_empty() {
+                println!("No vulnerabilities found for {}@{}", args.package, graph.graph[target_idx].version);
+                return Ok(());
+            }
+        } else {
+            return Ok(());
+        }
+    }
+    
     // Determine output format (CLI > config > default)
     let format = args.format;
     
     // Format and print output
     let output = match format {
-        OutputFormat::Tree => TreeOutput.format(&graph, &result)?,
-        OutputFormat::Json => JsonOutput.format(&graph, &result)?,
+        OutputFormat::Tree => TreeOutput.format_with_security(&graph, &result, vuln_info.as_ref())?,
+        OutputFormat::Json => JsonOutput.format_with_security(&graph, &result, vuln_info.as_ref())?,
         OutputFormat::Mermaid => MermaidOutput.format(&graph, &result)?,
     };
     

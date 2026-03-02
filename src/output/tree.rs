@@ -1,6 +1,7 @@
 use super::OutputFormat;
 use crate::error::Result;
 use crate::graph::{DependencyGraph, QueryResult};
+use crate::security::VulnerabilityInfo;
 use colored::Colorize;
 use std::collections::HashMap;
 
@@ -8,15 +9,65 @@ pub struct TreeOutput;
 
 impl OutputFormat for TreeOutput {
     fn format(&self, graph: &DependencyGraph, result: &QueryResult) -> Result<String> {
+        self.format_with_security(graph, result, None)
+    }
+    
+    fn format_with_security(
+        &self,
+        graph: &DependencyGraph,
+        result: &QueryResult,
+        vuln_info: Option<&VulnerabilityInfo>,
+    ) -> Result<String> {
         let mut output = String::new();
         
-        // Header: target@version
+        // Header: target@version with vulnerability marker
+        let vuln_marker = if let Some(info) = vuln_info {
+            if info.is_vulnerable() {
+                format!(" {}", "[VULNERABLE]".red().bold())
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        
         output.push_str(&format!(
-            "{}\n",
+            "{}{}\n",
             format!("{}@{}", result.target_name, result.target_version)
                 .yellow()
-                .bold()
+                .bold(),
+            vuln_marker
         ));
+        
+        // Show vulnerability details if present
+        if let Some(info) = vuln_info {
+            for vuln in &info.vulnerabilities {
+                let severity_str = match vuln.severity {
+                    crate::security::Severity::Critical => format!("({})", vuln.severity).red().bold().to_string(),
+                    crate::security::Severity::High => format!("({})", vuln.severity).red().to_string(),
+                    crate::security::Severity::Medium => format!("({})", vuln.severity).yellow().to_string(),
+                    crate::security::Severity::Low => format!("({})", vuln.severity).white().to_string(),
+                };
+                output.push_str(&format!(
+                    "├── {}: {} {}\n",
+                    "CVE".red().bold(),
+                    vuln.id,
+                    severity_str
+                ));
+                output.push_str(&format!(
+                    "│   {}: {}\n",
+                    "Summary".dimmed(),
+                    vuln.summary.chars().take(80).collect::<String>()
+                ));
+                if let Some(ref url) = vuln.url {
+                    output.push_str(&format!(
+                        "│   {}: {}\n",
+                        "Advisory".dimmed(),
+                        url.blue().underline()
+                    ));
+                }
+            }
+        }
         
         if result.paths.is_empty() {
             output.push_str("\nNo paths found.\n");

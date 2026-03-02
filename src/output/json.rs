@@ -1,6 +1,7 @@
 use super::OutputFormat;
 use crate::error::Result;
 use crate::graph::{DependencyGraph, QueryResult};
+use crate::security::VulnerabilityInfo;
 use serde::Serialize;
 
 pub struct JsonOutput;
@@ -13,10 +14,37 @@ struct JsonResult {
     summary: JsonSummary,
 }
 
+/// JSON output structure with vulnerabilities per spec Section 13.4
+#[derive(Serialize)]
+struct JsonResultWithSecurity {
+    target: JsonTargetWithSecurity,
+    paths: Vec<JsonPath>,
+    summary: JsonSummary,
+}
+
 #[derive(Serialize)]
 struct JsonTarget {
     name: String,
     version: String,
+}
+
+#[derive(Serialize)]
+struct JsonTargetWithSecurity {
+    name: String,
+    version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vulnerabilities: Option<Vec<JsonVulnerability>>,
+}
+
+#[derive(Serialize)]
+struct JsonVulnerability {
+    id: String,
+    severity: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    score: Option<f64>,
+    summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +65,15 @@ struct JsonSummary {
 
 impl OutputFormat for JsonOutput {
     fn format(&self, graph: &DependencyGraph, result: &QueryResult) -> Result<String> {
+        self.format_with_security(graph, result, None)
+    }
+    
+    fn format_with_security(
+        &self,
+        graph: &DependencyGraph,
+        result: &QueryResult,
+        vuln_info: Option<&VulnerabilityInfo>,
+    ) -> Result<String> {
         let json_paths: Vec<JsonPath> = result.paths
             .iter()
             .map(|path| {
@@ -65,21 +102,53 @@ impl OutputFormat for JsonOutput {
             .map(|&idx| graph.graph[idx].name.clone())
             .collect();
         
-        let output = JsonResult {
-            target: JsonTarget {
-                name: result.target_name.clone(),
-                version: result.target_version.clone(),
-            },
-            paths: json_paths,
-            summary: JsonSummary {
-                total_paths: result.total_paths(),
-                shortest_depth: result.shortest_depth,
-                longest_depth: result.longest_depth,
-                direct_dependents,
-            },
+        let summary = JsonSummary {
+            total_paths: result.total_paths(),
+            shortest_depth: result.shortest_depth,
+            longest_depth: result.longest_depth,
+            direct_dependents,
         };
         
-        Ok(serde_json::to_string_pretty(&output)?)
+        // If we have vulnerability info, use the security-aware output format
+        if let Some(info) = vuln_info {
+            let vulnerabilities: Vec<JsonVulnerability> = info.vulnerabilities
+                .iter()
+                .map(|v| JsonVulnerability {
+                    id: v.id.clone(),
+                    severity: v.severity.to_string(),
+                    score: v.score,
+                    summary: v.summary.clone(),
+                    url: v.url.clone(),
+                })
+                .collect();
+            
+            let output = JsonResultWithSecurity {
+                target: JsonTargetWithSecurity {
+                    name: result.target_name.clone(),
+                    version: result.target_version.clone(),
+                    vulnerabilities: if vulnerabilities.is_empty() {
+                        None
+                    } else {
+                        Some(vulnerabilities)
+                    },
+                },
+                paths: json_paths,
+                summary,
+            };
+            
+            Ok(serde_json::to_string_pretty(&output)?)
+        } else {
+            let output = JsonResult {
+                target: JsonTarget {
+                    name: result.target_name.clone(),
+                    version: result.target_version.clone(),
+                },
+                paths: json_paths,
+                summary,
+            };
+            
+            Ok(serde_json::to_string_pretty(&output)?)
+        }
     }
 }
 

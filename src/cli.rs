@@ -46,6 +46,26 @@ pub struct Args {
     /// Project directory (default: current directory)
     #[arg(long, value_name = "DIR")]
     pub dir: Option<PathBuf>,
+    
+    /// Check packages for known vulnerabilities (queries OSV database)
+    #[arg(long, short = 's')]
+    pub security: bool,
+    
+    /// Only show packages with vulnerabilities
+    #[arg(long)]
+    pub security_only: bool,
+    
+    /// Minimum severity to report (low, medium, high, critical)
+    #[arg(long, value_enum)]
+    pub severity: Option<Severity>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Severity {
+    Low,
+    Medium,
+    High,
+    Critical,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
@@ -167,5 +187,43 @@ mod tests {
     fn test_default_depth_unlimited() {
         let args = Args::parse_from(["dep-why", "lodash"]);
         assert!(args.depth.is_none()); // unlimited by default per spec
+    }
+
+    #[test]
+    fn test_parse_security_flag() {
+        let args = Args::parse_from(["dep-why", "-s", "lodash"]);
+        assert!(args.security);
+    }
+
+    #[test]
+    fn test_parse_security_long() {
+        let args = Args::parse_from(["dep-why", "--security", "lodash"]);
+        assert!(args.security);
+    }
+
+    #[test]
+    fn test_parse_security_only() {
+        let args = Args::parse_from(["dep-why", "--security-only", "lodash"]);
+        assert!(args.security_only);
+    }
+
+    #[test]
+    fn test_parse_severity() {
+        let args = Args::parse_from(["dep-why", "--severity", "high", "lodash"]);
+        assert!(matches!(args.severity, Some(Severity::High)));
+    }
+
+    #[test]
+    fn test_parse_severity_critical() {
+        let args = Args::parse_from(["dep-why", "--severity", "critical", "lodash"]);
+        assert!(matches!(args.severity, Some(Severity::Critical)));
+    }
+
+    #[test]
+    fn test_default_no_security() {
+        let args = Args::parse_from(["dep-why", "lodash"]);
+        assert!(!args.security);
+        assert!(!args.security_only);
+        assert!(args.severity.is_none());
     }
 }

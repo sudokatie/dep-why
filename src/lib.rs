@@ -4,6 +4,7 @@ pub mod error;
 pub mod graph;
 pub mod output;
 pub mod parsers;
+pub mod security;
 
 use cli::{Args, Ecosystem, OutputFormat};
 use config::Config;
@@ -186,6 +187,9 @@ mod tests {
             version_match: None,
             quiet: false,
             dir: Some(dir.path().to_path_buf()),
+            security: false,
+            security_only: false,
+            severity: None,
         };
         
         let result = run(args);
@@ -208,6 +212,9 @@ mod tests {
             version_match: None,
             quiet: false,
             dir: Some(dir.path().to_path_buf()),
+            security: false,
+            security_only: false,
+            severity: None,
         };
         
         let result = run(args);
@@ -230,6 +237,9 @@ mod tests {
             version_match: None,
             quiet: false,
             dir: Some(dir.path().to_path_buf()),
+            security: false,
+            security_only: false,
+            severity: None,
         };
         
         let result = run(args);
@@ -253,6 +263,9 @@ mod tests {
             version_match: None,
             quiet: false,
             dir: Some(dir.path().to_path_buf()),
+            security: false,
+            security_only: false,
+            severity: None,
         };
         
         let result = run(args);
@@ -275,6 +288,9 @@ mod tests {
             version_match: None,
             quiet: true,
             dir: Some(dir.path().to_path_buf()),
+            security: false,
+            security_only: false,
+            severity: None,
         };
         
         let result = run(args);
@@ -297,6 +313,9 @@ mod tests {
             version_match: None,
             quiet: false,
             dir: Some(dir.path().to_path_buf()),
+            security: false,
+            security_only: false,
+            severity: None,
         };
         
         let result = run(args);

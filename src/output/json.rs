@@ -1,6 +1,7 @@
-use super::OutputFormat;
+use super::{OutputFormat, OutputOptions};
 use crate::error::Result;
 use crate::graph::{DependencyGraph, QueryResult};
+// LicenseRisk and LicenseSummary types used via OutputOptions
 use crate::security::VulnerabilityInfo;
 use serde::Serialize;
 
@@ -61,6 +62,73 @@ struct JsonSummary {
     shortest_depth: usize,
     longest_depth: usize,
     direct_dependents: Vec<String>,
+}
+
+/// JSON output with both security and license info
+#[derive(Serialize)]
+struct JsonResultFull {
+    target: JsonTargetFull,
+    paths: Vec<JsonPathWithLicense>,
+    summary: JsonSummaryFull,
+}
+
+#[derive(Serialize)]
+struct JsonTargetFull {
+    name: String,
+    version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    license: Option<JsonLicense>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vulnerabilities: Option<Vec<JsonVulnerability>>,
+}
+
+#[derive(Serialize)]
+struct JsonLicense {
+    spdx: String,
+    is_copyleft: bool,
+    risk: String,
+}
+
+#[derive(Serialize)]
+struct JsonPathWithLicense {
+    chain: Vec<JsonPackageInfo>,
+    depth: usize,
+    is_dev: bool,
+}
+
+#[derive(Serialize)]
+struct JsonPackageInfo {
+    name: String,
+    version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    license: Option<JsonLicense>,
+}
+
+#[derive(Serialize)]
+struct JsonSummaryFull {
+    total_paths: usize,
+    shortest_depth: usize,
+    longest_depth: usize,
+    direct_dependents: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    licenses: Option<JsonLicenseSummary>,
+}
+
+#[derive(Serialize)]
+struct JsonLicenseSummary {
+    total_packages: usize,
+    copyleft_count: usize,
+    permissive_count: usize,
+    unknown_count: usize,
+    high_risk: Vec<JsonPackageLicense>,
+    medium_risk: Vec<JsonPackageLicense>,
+}
+
+#[derive(Serialize)]
+struct JsonPackageLicense {
+    name: String,
+    version: String,
+    license: String,
 }
 
 impl OutputFormat for JsonOutput {
@@ -149,6 +217,107 @@ impl OutputFormat for JsonOutput {
             
             Ok(serde_json::to_string_pretty(&output)?)
         }
+    }
+    
+    fn format_with_options(
+        &self,
+        graph: &DependencyGraph,
+        result: &QueryResult,
+        options: &OutputOptions,
+    ) -> Result<String> {
+        // If no licenses requested, fall back to security-only format
+        if !options.show_licenses {
+            return self.format_with_security(graph, result, options.vuln_info);
+        }
+        
+        let json_paths: Vec<JsonPathWithLicense> = result.paths
+            .iter()
+            .map(|path| {
+                let chain: Vec<JsonPackageInfo> = path.nodes
+                    .iter()
+                    .skip(1)
+                    .map(|&node| {
+                        let pkg = &graph.graph[node];
+                        let license = pkg.license.as_ref().map(|l| JsonLicense {
+                            spdx: l.spdx.clone(),
+                            is_copyleft: l.is_copyleft,
+                            risk: format!("{:?}", l.risk),
+                        });
+                        JsonPackageInfo {
+                            name: pkg.name.clone(),
+                            version: pkg.version.clone(),
+                            license,
+                        }
+                    })
+                    .collect();
+                
+                JsonPathWithLicense {
+                    depth: chain.len(),
+                    is_dev: path.is_dev(),
+                    chain,
+                }
+            })
+            .collect();
+        
+        let direct_dependents: Vec<String> = result.direct_dependents
+            .iter()
+            .map(|&idx| graph.graph[idx].name.clone())
+            .collect();
+        
+        // Build license summary if provided
+        let licenses_summary = options.license_summary.map(|s| JsonLicenseSummary {
+            total_packages: s.total_packages,
+            copyleft_count: s.copyleft_count,
+            permissive_count: s.permissive_count,
+            unknown_count: s.unknown_count,
+            high_risk: s.high_risk.iter().map(|p| JsonPackageLicense {
+                name: p.name.clone(),
+                version: p.version.clone(),
+                license: p.license.clone(),
+            }).collect(),
+            medium_risk: s.medium_risk.iter().map(|p| JsonPackageLicense {
+                name: p.name.clone(),
+                version: p.version.clone(),
+                license: p.license.clone(),
+            }).collect(),
+        });
+        
+        // Build vulnerabilities if provided
+        let vulnerabilities = options.vuln_info.map(|info| {
+            info.vulnerabilities.iter().map(|v| JsonVulnerability {
+                id: v.id.clone(),
+                severity: v.severity.to_string(),
+                score: v.score,
+                summary: v.summary.clone(),
+                url: v.url.clone(),
+            }).collect::<Vec<_>>()
+        }).filter(|v: &Vec<JsonVulnerability>| !v.is_empty());
+        
+        // Build target license
+        let target_license = graph.graph[result.target].license.as_ref().map(|l| JsonLicense {
+            spdx: l.spdx.clone(),
+            is_copyleft: l.is_copyleft,
+            risk: format!("{:?}", l.risk),
+        });
+        
+        let output = JsonResultFull {
+            target: JsonTargetFull {
+                name: result.target_name.clone(),
+                version: result.target_version.clone(),
+                license: target_license,
+                vulnerabilities,
+            },
+            paths: json_paths,
+            summary: JsonSummaryFull {
+                total_paths: result.total_paths(),
+                shortest_depth: result.shortest_depth,
+                longest_depth: result.longest_depth,
+                direct_dependents,
+                licenses: licenses_summary,
+            },
+        };
+        
+        Ok(serde_json::to_string_pretty(&output)?)
     }
 }
 

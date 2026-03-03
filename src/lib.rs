@@ -184,14 +184,66 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
     
+    // Build license summary if --licenses flag is set
+    let license_summary = if args.licenses || args.licenses_only {
+        let mut summary = license::LicenseSummary::new();
+        
+        // Collect licenses from all packages in paths
+        for path in &result.paths {
+            for &node in &path.nodes {
+                let pkg = &graph.graph[node];
+                if let Some(ref lic) = pkg.license {
+                    summary.add(&pkg.name, &pkg.version, lic);
+                }
+            }
+        }
+        
+        // Also check target package
+        let target_pkg = &graph.graph[target_idx];
+        if let Some(ref lic) = target_pkg.license {
+            summary.add(&target_pkg.name, &target_pkg.version, lic);
+        }
+        
+        Some(summary)
+    } else {
+        None
+    };
+    
+    // If --licenses-only is set and no copyleft licenses, exit early
+    if args.licenses_only {
+        if let Some(ref summary) = license_summary {
+            if summary.copyleft_count == 0 {
+                println!("No copyleft licenses found for {}@{}", args.package, graph.graph[target_idx].version);
+                return Ok(());
+            }
+        }
+    }
+    
     // Determine output format (CLI > config > default)
     let format = args.format;
     
+    // Build output options
+    let output_options = output::OutputOptions {
+        vuln_info: vuln_info.as_ref(),
+        show_licenses: args.licenses || args.licenses_only,
+        license_summary: license_summary.as_ref(),
+    };
+    
     // Format and print output
-    let output = match format {
-        OutputFormat::Tree => TreeOutput.format_with_security(&graph, &result, vuln_info.as_ref())?,
-        OutputFormat::Json => JsonOutput.format_with_security(&graph, &result, vuln_info.as_ref())?,
-        OutputFormat::Mermaid => MermaidOutput.format(&graph, &result)?,
+    let output = if args.licenses || args.licenses_only {
+        // Use format_with_options for license-aware output
+        match format {
+            OutputFormat::Tree => TreeOutput.format_with_options(&graph, &result, &output_options)?,
+            OutputFormat::Json => JsonOutput.format_with_options(&graph, &result, &output_options)?,
+            OutputFormat::Mermaid => MermaidOutput.format(&graph, &result)?, // TODO: add license support
+        }
+    } else {
+        // Use format_with_security for security-only or basic output
+        match format {
+            OutputFormat::Tree => TreeOutput.format_with_security(&graph, &result, vuln_info.as_ref())?,
+            OutputFormat::Json => JsonOutput.format_with_security(&graph, &result, vuln_info.as_ref())?,
+            OutputFormat::Mermaid => MermaidOutput.format(&graph, &result)?,
+        }
     };
     
     print!("{}", output);

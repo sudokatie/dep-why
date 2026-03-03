@@ -1,14 +1,17 @@
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::Serialize;
 use std::collections::HashMap;
+use crate::license::LicenseInfo;
 
 /// A package in the dependency graph
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Package {
     pub name: String,
     pub version: String,
     pub is_direct: bool,
     pub is_dev: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<LicenseInfo>,
 }
 
 impl Package {
@@ -18,6 +21,7 @@ impl Package {
             version: version.into(),
             is_direct: false,
             is_dev: false,
+            license: None,
         }
     }
     
@@ -27,7 +31,13 @@ impl Package {
             version: version.into(),
             is_direct: true,
             is_dev: false,
+            license: None,
         }
+    }
+    
+    pub fn with_license(mut self, license: impl Into<String>) -> Self {
+        self.license = Some(LicenseInfo::new(license));
+        self
     }
     
     pub fn id(&self) -> String {

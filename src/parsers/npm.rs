@@ -19,6 +19,7 @@ struct PackageLock {
 #[derive(Deserialize, Default)]
 struct NpmPackage {
     version: Option<String>,
+    license: Option<NpmLicense>,
     #[serde(default)]
     dependencies: HashMap<String, String>,
     #[serde(rename = "devDependencies", default)]
@@ -29,6 +30,23 @@ struct NpmPackage {
     #[serde(default)]
     #[allow(dead_code)]
     dev: bool,
+}
+
+/// License can be a string or an object with type field
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum NpmLicense {
+    Simple(String),
+    Object { r#type: String },
+}
+
+impl std::fmt::Display for NpmLicense {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NpmLicense::Simple(s) => write!(f, "{}", s),
+            NpmLicense::Object { r#type } => write!(f, "{}", r#type),
+        }
+    }
 }
 
 impl Parser for NpmParser {
@@ -64,7 +82,8 @@ impl Parser for NpmParser {
                 // Extract package name from path (e.g., "node_modules/lodash" -> "lodash")
                 let name = extract_package_name(key);
                 let version = pkg.version.clone().unwrap_or_else(|| "0.0.0".to_string());
-                let idx = builder.add_package(&name, &version);
+                let license = pkg.license.as_ref().map(|l| l.to_string());
+                let idx = builder.add_package_with_license(&name, &version, license);
                 package_map.insert(key.clone(), idx);
             }
         }
@@ -270,5 +289,67 @@ mod tests {
         let graph = parser.parse(&dir.path().join("package-lock.json")).unwrap();
         
         assert!(graph.get_package("jest").is_some());
+    }
+
+    #[test]
+    fn test_parse_license_string() {
+        let dir = TempDir::new().unwrap();
+        create_package_lock(dir.path(), r#"{
+            "name": "app",
+            "lockfileVersion": 3,
+            "packages": {
+                "": {
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "lodash": "^4.17.21"
+                    }
+                },
+                "node_modules/lodash": {
+                    "version": "4.17.21",
+                    "license": "MIT"
+                }
+            }
+        }"#);
+        
+        let parser = NpmParser;
+        let graph = parser.parse(&dir.path().join("package-lock.json")).unwrap();
+        
+        let idx = graph.get_package("lodash").unwrap();
+        let pkg = &graph.graph[idx];
+        assert!(pkg.license.is_some());
+        let license = pkg.license.as_ref().unwrap();
+        assert_eq!(license.spdx, "MIT");
+        assert!(!license.is_copyleft);
+    }
+
+    #[test]
+    fn test_parse_license_object() {
+        let dir = TempDir::new().unwrap();
+        create_package_lock(dir.path(), r#"{
+            "name": "app",
+            "lockfileVersion": 3,
+            "packages": {
+                "": {
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "some-pkg": "^1.0.0"
+                    }
+                },
+                "node_modules/some-pkg": {
+                    "version": "1.0.0",
+                    "license": { "type": "GPL-3.0" }
+                }
+            }
+        }"#);
+        
+        let parser = NpmParser;
+        let graph = parser.parse(&dir.path().join("package-lock.json")).unwrap();
+        
+        let idx = graph.get_package("some-pkg").unwrap();
+        let pkg = &graph.graph[idx];
+        assert!(pkg.license.is_some());
+        let license = pkg.license.as_ref().unwrap();
+        assert_eq!(license.spdx, "GPL-3.0");
+        assert!(license.is_copyleft);
     }
 }

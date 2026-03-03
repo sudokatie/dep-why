@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod graph;
+pub mod license;
 pub mod output;
 pub mod parsers;
 pub mod security;
@@ -248,6 +249,8 @@ mod tests {
             security: false,
             security_only: false,
             severity: None,
+            licenses: false,
+            licenses_only: false,
         };
         
         let result = run(args);
@@ -273,6 +276,8 @@ mod tests {
             security: false,
             security_only: false,
             severity: None,
+            licenses: false,
+            licenses_only: false,
         };
         
         let result = run(args);
@@ -298,6 +303,8 @@ mod tests {
             security: false,
             security_only: false,
             severity: None,
+            licenses: false,
+            licenses_only: false,
         };
         
         let result = run(args);
@@ -324,6 +331,8 @@ mod tests {
             security: false,
             security_only: false,
             severity: None,
+            licenses: false,
+            licenses_only: false,
         };
         
         let result = run(args);
@@ -349,6 +358,8 @@ mod tests {
             security: false,
             security_only: false,
             severity: None,
+            licenses: false,
+            licenses_only: false,
         };
         
         let result = run(args);
@@ -374,6 +385,8 @@ mod tests {
             security: false,
             security_only: false,
             severity: None,
+            licenses: false,
+            licenses_only: false,
         };
         
         let result = run(args);

@@ -58,6 +58,14 @@ pub struct Args {
     /// Minimum severity to report (low, medium, high, critical)
     #[arg(long, value_enum)]
     pub severity: Option<Severity>,
+    
+    /// Show license information for packages
+    #[arg(long)]
+    pub licenses: bool,
+    
+    /// Only show packages with copyleft licenses (GPL, AGPL, LGPL, etc.)
+    #[arg(long)]
+    pub licenses_only: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, PartialOrd, Ord)]
@@ -225,5 +233,24 @@ mod tests {
         assert!(!args.security);
         assert!(!args.security_only);
         assert!(args.severity.is_none());
+    }
+
+    #[test]
+    fn test_parse_licenses_flag() {
+        let args = Args::parse_from(["dep-why", "--licenses", "lodash"]);
+        assert!(args.licenses);
+    }
+
+    #[test]
+    fn test_parse_licenses_only_flag() {
+        let args = Args::parse_from(["dep-why", "--licenses-only", "lodash"]);
+        assert!(args.licenses_only);
+    }
+
+    #[test]
+    fn test_default_no_licenses() {
+        let args = Args::parse_from(["dep-why", "lodash"]);
+        assert!(!args.licenses);
+        assert!(!args.licenses_only);
     }
 }

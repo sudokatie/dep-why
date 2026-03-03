@@ -31,6 +31,20 @@ impl GraphBuilder {
         self.graph.add_package(pkg)
     }
     
+    pub fn add_package_with_license(
+        &mut self,
+        name: impl Into<String>,
+        version: impl Into<String>,
+        license: Option<impl Into<String>>,
+    ) -> NodeIndex {
+        let pkg = if let Some(lic) = license {
+            Package::new(name, version).with_license(lic)
+        } else {
+            Package::new(name, version)
+        };
+        self.graph.add_package(pkg)
+    }
+    
     pub fn add_direct_package(&mut self, name: impl Into<String>, version: impl Into<String>) -> NodeIndex {
         let mut pkg = Package::new(name, version);
         pkg.is_direct = true;

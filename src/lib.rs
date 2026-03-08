@@ -10,13 +10,18 @@ pub mod security;
 use cli::{Args, Ecosystem, OutputFormat};
 use config::Config;
 pub use error::{Error, Result};
-use graph::{PathFinder, SearchOptions};
+use graph::{PathFinder, SearchOptions, detect_cycles, format_cycles_terminal, format_cycles_json, format_cycles_mermaid};
 use output::{TreeOutput, JsonOutput, MermaidOutput, OutputFormat as OutputTrait};
 use parsers::{detect_ecosystem, detect_from_path, parse_lock_file};
 use std::path::PathBuf;
 
 /// Run the dependency tracer with the given arguments
 pub fn run(args: Args) -> Result<()> {
+    // Handle cycle detection mode
+    if args.cycles {
+        return run_cycle_detection(&args);
+    }
+    
     // Load config
     let config = Config::load(args.lock_file.as_ref()).unwrap_or_default();
     
@@ -71,23 +76,26 @@ pub fn run(args: Args) -> Result<()> {
     // Parse lock file
     let graph = parse_lock_file(&lock_path, ecosystem)?;
     
+    // Get package name (guaranteed to be Some since we handle cycles mode above)
+    let package = args.package.as_ref().expect("package required when not in cycles mode");
+    
     // Find target package
     let target_idx = if let Some(ref version) = args.version_match {
         // Match specific version
-        graph.get_package_version(&args.package, version).ok_or_else(|| {
-            let versions = graph.get_package_versions(&args.package);
+        graph.get_package_version(package, version).ok_or_else(|| {
+            let versions = graph.get_package_versions(package);
             if versions.is_empty() {
-                Error::package_not_found(&args.package)
+                Error::package_not_found(package)
             } else {
                 let available: Vec<String> = versions.iter()
                     .map(|(_, p)| p.version.clone())
                     .collect();
-                Error::version_not_found(&args.package, version, available.join(", "))
+                Error::version_not_found(package, version, available.join(", "))
             }
         })?
     } else {
-        graph.get_package(&args.package).ok_or_else(|| {
-            Error::package_not_found(&args.package)
+        graph.get_package(package).ok_or_else(|| {
+            Error::package_not_found(package)
         })?
     };
     
@@ -108,7 +116,7 @@ pub fn run(args: Args) -> Result<()> {
             return Ok(());
         } else {
             // Package exists but not reachable
-            eprintln!("{} is not in your dependency tree", args.package);
+            eprintln!("{} is not in your dependency tree", package);
             return Ok(());
         }
     }
@@ -118,7 +126,7 @@ pub fn run(args: Args) -> Result<()> {
     
     if result.paths.is_empty() {
         // Package exists but is not reachable from roots
-        eprintln!("Package '{}' exists but is not reachable from direct dependencies.", args.package);
+        eprintln!("Package '{}' exists but is not reachable from direct dependencies.", package);
         eprintln!("It may be an orphaned or optional dependency.");
         if !args.include_dev {
             eprintln!("Try --include-dev to include dev dependencies in the search.");
@@ -176,7 +184,7 @@ pub fn run(args: Args) -> Result<()> {
     if args.security_only {
         if let Some(ref info) = vuln_info {
             if info.vulnerabilities.is_empty() {
-                println!("No vulnerabilities found for {}@{}", args.package, graph.graph[target_idx].version);
+                println!("No vulnerabilities found for {}@{}", package, graph.graph[target_idx].version);
                 return Ok(());
             }
         } else {
@@ -213,7 +221,7 @@ pub fn run(args: Args) -> Result<()> {
     if args.licenses_only {
         if let Some(ref summary) = license_summary {
             if summary.copyleft_count == 0 {
-                println!("No copyleft licenses found for {}@{}", args.package, graph.graph[target_idx].version);
+                println!("No copyleft licenses found for {}@{}", package, graph.graph[target_idx].version);
                 return Ok(());
             }
         }
@@ -247,6 +255,71 @@ pub fn run(args: Args) -> Result<()> {
     };
     
     print!("{}", output);
+    
+    Ok(())
+}
+
+/// Run cycle detection mode
+fn run_cycle_detection(args: &Args) -> Result<()> {
+    // Determine working directory
+    let dir = args.dir.clone().unwrap_or_else(|| PathBuf::from("."));
+    
+    if !dir.exists() {
+        return Err(Error::io_error(&dir, std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "directory not found"
+        )));
+    }
+    
+    // Determine lock file and ecosystem (same logic as main run)
+    let (lock_path, ecosystem) = if let Some(ref lock_file) = args.lock_file {
+        if !lock_file.exists() {
+            return Err(Error::io_error(lock_file, std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "lock file not found"
+            )));
+        }
+        let eco = args.ecosystem.or_else(|| detect_from_path(lock_file))
+            .ok_or(Error::UnsupportedFormat(lock_file.clone()))?;
+        (lock_file.clone(), eco)
+    } else if let Some(eco) = args.ecosystem {
+        let lock_path = match eco {
+            Ecosystem::Npm => dir.join("package-lock.json"),
+            Ecosystem::Cargo => dir.join("Cargo.lock"),
+            Ecosystem::Pip => {
+                let pipfile = dir.join("Pipfile.lock");
+                if pipfile.exists() { pipfile } else { dir.join("poetry.lock") }
+            }
+        };
+        if !lock_path.exists() {
+            return Err(Error::NoLockFile);
+        }
+        (lock_path, eco)
+    } else {
+        let detected = detect_ecosystem(&dir).ok_or(Error::NoLockFile)?;
+        (detected.path, detected.ecosystem)
+    };
+    
+    // Parse lock file
+    let graph = parse_lock_file(&lock_path, ecosystem)?;
+    
+    // Detect cycles
+    let result = detect_cycles(&graph);
+    
+    // Format and output
+    let output = match args.format {
+        OutputFormat::Json => serde_json::to_string_pretty(&format_cycles_json(&result))
+            .unwrap_or_else(|_| "{}".to_string()),
+        OutputFormat::Mermaid => format_cycles_mermaid(&result),
+        OutputFormat::Tree => format_cycles_terminal(&result),
+    };
+    
+    println!("{}", output);
+    
+    // Exit with error code if cycles found (for CI integration)
+    if result.has_cycles && args.quiet {
+        std::process::exit(1);
+    }
     
     Ok(())
 }
@@ -288,7 +361,7 @@ mod tests {
         create_npm_project(dir.path());
         
         let args = Args {
-            package: "accepts".to_string(),
+            package: Some("accepts".to_string()), cycles: false,
             all: false,
             depth: None,
             format: OutputFormat::Tree,
@@ -315,7 +388,7 @@ mod tests {
         create_npm_project(dir.path());
         
         let args = Args {
-            package: "nonexistent".to_string(),
+            package: Some("nonexistent".to_string()), cycles: false,
             all: false,
             depth: None,
             format: OutputFormat::Tree,
@@ -342,7 +415,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         
         let args = Args {
-            package: "lodash".to_string(),
+            package: Some("lodash".to_string()), cycles: false,
             all: false,
             depth: None,
             format: OutputFormat::Tree,
@@ -370,7 +443,7 @@ mod tests {
         create_npm_project(dir.path());
         
         let args = Args {
-            package: "accepts".to_string(),
+            package: Some("accepts".to_string()), cycles: false,
             all: false,
             depth: None,
             format: OutputFormat::Json,
@@ -397,7 +470,7 @@ mod tests {
         create_npm_project(dir.path());
         
         let args = Args {
-            package: "accepts".to_string(),
+            package: Some("accepts".to_string()), cycles: false,
             all: false,
             depth: None,
             format: OutputFormat::Tree,
@@ -424,7 +497,7 @@ mod tests {
         create_npm_project(dir.path());
         
         let args = Args {
-            package: "accepts".to_string(),
+            package: Some("accepts".to_string()), cycles: false,
             all: false,
             depth: None,
             format: OutputFormat::Tree,

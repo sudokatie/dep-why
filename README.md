@@ -14,6 +14,7 @@ dep-why traces every route from your direct dependencies to any transitive depen
 
 - Multi-ecosystem: npm, cargo, pip (Pipfile.lock and poetry.lock)
 - All paths or just the shortest - your choice
+- Circular dependency detection with suggested break points
 - Multiple output formats: colored tree, JSON, Mermaid diagrams
 - Fast - parses lock files, not installed packages
 - Depth limiting for those terrifying dependency trees
@@ -57,6 +58,12 @@ dep-why jest --include-dev
 # Check a specific version
 dep-why lodash -v 4.17.21
 
+# Detect circular dependencies
+dep-why --cycles
+
+# Cycle detection with Mermaid output (for docs)
+dep-why --cycles -f mermaid
+
 # Quiet mode for scripts (exit 0 if found)
 dep-why lodash -q && echo "found"
 
@@ -70,12 +77,13 @@ dep-why serde -e cargo
 ## CLI Reference
 
 ```
-dep-why [OPTIONS] <PACKAGE>
+dep-why [OPTIONS] [PACKAGE]
 
 Arguments:
-  <PACKAGE>  Package name to search for
+  [PACKAGE]  Package name to search for (not required with --cycles)
 
 Options:
+      --cycles             Detect circular dependencies
   -a, --all                Show all paths (default: up to 5 shortest)
   -d, --depth <N>          Maximum depth to search [default: unlimited]
   -f, --format <FORMAT>    Output format [tree, json, mermaid] [default: tree]
@@ -142,6 +150,31 @@ graph TD
 ```
 
 Paste this into any GitHub markdown file to get a rendered diagram.
+
+## Circular Dependency Detection
+
+Circular dependencies cause build issues, slow compilation, and can lead to subtle runtime bugs. Use `--cycles` to find them:
+
+```bash
+dep-why --cycles
+```
+
+Output:
+```
+Found 1 circular dependency chain(s) involving 3 packages:
+
+Cycle 1: 3 packages
+  module-a -> module-b -> module-c -> module-a (cycle)
+  Suggested break point: module-c (fewest in-cycle dependencies)
+```
+
+The suggested break point is the package with the fewest dependencies within the cycle - typically the easiest place to refactor.
+
+For CI integration, combine with `--quiet` to exit with code 1 if cycles are found:
+
+```bash
+dep-why --cycles --quiet || echo "Circular dependencies detected!"
+```
 
 ## Configuration
 

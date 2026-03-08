@@ -7,9 +7,13 @@ use std::path::PathBuf;
 #[command(about = "Trace why any dependency exists in your project")]
 #[command(long_about = "Find all paths from your direct dependencies to any transitive dependency. Supports npm, cargo, and pip.")]
 pub struct Args {
-    /// Package name to search for
-    #[arg(value_name = "PACKAGE")]
-    pub package: String,
+    /// Package name to search for (not required with --cycles)
+    #[arg(value_name = "PACKAGE", required_unless_present = "cycles")]
+    pub package: Option<String>,
+    
+    /// Detect circular dependencies in the project
+    #[arg(long)]
+    pub cycles: bool,
     
     /// Show all paths (default: show up to 5 shortest)
     #[arg(long, short = 'a')]
@@ -102,7 +106,7 @@ mod tests {
     #[test]
     fn test_parse_package_only() {
         let args = Args::parse_from(["dep-why", "lodash"]);
-        assert_eq!(args.package, "lodash");
+        assert_eq!(args.package, Some("lodash".to_string()));
         assert!(!args.all);
         assert!(matches!(args.format, OutputFormat::Tree));
     }
